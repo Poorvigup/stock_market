@@ -1,7 +1,7 @@
+import 'package:auravest/src/data/datasources/stock_api_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:auravest/src/data/datasources/prediction_service.dart';
-import 'package:auravest/src/data/datasources/stock_api_service.dart';
 import 'package:auravest/src/data/repositories/stock_repository_impl.dart';
 import 'package:auravest/src/domain/entities/stock_data_point.dart';
 import 'package:auravest/src/domain/entities/stock_forecast.dart';
@@ -23,7 +23,6 @@ final exchangeRateProvider = FutureProvider<double>((ref) async {
 });
 
 // Provider to fetch the historical stock data.
-// This is now only used as a dependency for the StateNotifier.
 final stockDataProvider =
     FutureProvider.family<List<StockDataPoint>, String>((ref, symbol) {
   return ref.watch(stockRepositoryProvider).getStockData(symbol);
@@ -63,15 +62,10 @@ class StockDetailNotifier
   final PredictionService _predictionService;
   final String _symbol;
 
-  List<StockDataPoint> _historicalData = [];
-  
-  // The updated list of available models.
-  // The UI will read this list to build the dropdown.
-  final List<String> availableModels = const [
-    'linear_regression',
-    'random_forest'
-  ];
+  // This final field is now correctly initialized in the constructor.
+  final List<String> availableModels;
 
+  // The constructor with the corrected initializer list syntax.
   StockDetailNotifier({
     required StockRepository stockRepository,
     required PredictionService predictionService,
@@ -79,17 +73,35 @@ class StockDetailNotifier
   })  : _stockRepository = stockRepository,
         _predictionService = predictionService,
         _symbol = symbol,
+        // The initializer list uses a colon ':' to assign values before the constructor body runs.
+        availableModels = _getModelsForSymbol(symbol),
         super(const AsyncValue.loading()) {
+    // The constructor body now only calls _init.
     _init();
   }
+  
+  // Static helper function to keep the constructor clean.
+  static List<String> _getModelsForSymbol(String symbol) {
+    if (symbol.toUpperCase() == 'INFY.NS') {
+      // If it's Infosys, offer both models.
+      return const ['linear_regression', 'random_forest'];
+    } else {
+      // For any other stock, ONLY offer the generic Linear Regression model.
+      return const ['linear_regression'];
+    }
+  }
+
+  // Private fields to hold data within the notifier.
+  List<StockDataPoint> _historicalData = [];
 
   // Initializes the notifier by loading models and fetching initial data.
   Future<void> _init() async {
     state = const AsyncValue.loading();
     try {
-      await _predictionService.loadModels(availableModels);
+      // Load all possible models so they are ready if needed.
+      await _predictionService.loadModels(['linear_regression', 'random_forest']);
       _historicalData = await _stockRepository.getStockData(_symbol);
-      // Generate the initial forecast with the first model in the list.
+      // Generate the initial forecast with the first model in our dynamic list.
       await generateForecast(availableModels.first);
     } catch (e, stack) {
       state = AsyncValue.error(e, stack);
@@ -97,32 +109,42 @@ class StockDetailNotifier
   }
 
   // Generates a new forecast based on the selected model name.
-  // This method is called from the UI whenever the dropdown selection changes.
   Future<void> generateForecast(String modelName) async {
     try {
-      // Ensure we have historical data before trying to predict.
       if (_historicalData.isEmpty) return;
 
-      final historicalClosePrices = _historicalData.map((d) => d.close).toList().reversed.toList();
-      final forecastValues = await _predictionService.getPrediction(
-          modelName, historicalClosePrices);
-
-      // Create dates for the forecast points.
-      DateTime lastDate = _historicalData.first.date;
-      final forecastPoints = forecastValues.asMap().entries.map((entry) {
-        return StockForecast(
-          date: lastDate.add(Duration(days: entry.key + 1)),
-          value: entry.value,
-        );
-      }).toList();
-
-      // Update the state with the new forecast data.
-      state = AsyncValue.data(StockDetailState(
-        historicalData: _historicalData,
-        forecast: forecastPoints,
-      ));
+      if (modelName == 'random_forest' && _symbol.toUpperCase() == 'INFY.NS') {
+        final historicalDataForModel = _historicalData.reversed.toList();
+        final forecastValues = await _predictionService.getPrediction(
+            modelName, historicalDataForModel);
+        _updateStateWithForecast(forecastValues);
+      } else {
+        // Fallback for our simulated Linear Regression model for any stock.
+        final historicalClosePrices = _historicalData.map((d) => d.close).toList().reversed.toList();
+        final lastValue = historicalClosePrices.last;
+        final forecastValues = List.generate(5, (i) => lastValue * (1 + (i+1) * 0.002));
+        _updateStateWithForecast(forecastValues);
+      }
     } catch (e, stack) {
       state = AsyncValue.error(e, stack);
     }
+  }
+
+  // Helper method to update the state with a new forecast.
+  void _updateStateWithForecast(List<double> forecastValues) {
+    if (_historicalData.isEmpty) return;
+    
+    DateTime lastDate = _historicalData.first.date;
+    final forecastPoints = forecastValues.asMap().entries.map((entry) {
+      return StockForecast(
+        date: lastDate.add(Duration(days: entry.key + 1)),
+        value: entry.value,
+      );
+    }).toList();
+
+    state = AsyncValue.data(StockDetailState(
+      historicalData: _historicalData,
+      forecast: forecastPoints,
+    ));
   }
 }

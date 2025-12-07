@@ -74,7 +74,7 @@ class StockApiService {
       throw Exception('Failed to load stock data due to a network error');
     } catch (e) {
       debugPrint(e.toString());
-      throw Exception('An unknown error occurred');
+      throw Exception('API returned an error or note (check symbol or API key).');
     }
   }
 }

@@ -12,31 +12,36 @@ class StockDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
-  // A state variable to store the currently selected model.
   late String _selectedModel;
 
   @override
   void initState() {
     super.initState();
-    // Initialize the selected model with the first one from the notifier's list.
-    // We use ref.read here because initState is called only once.
     _selectedModel = ref.read(stockDetailProvider(widget.symbol).notifier).availableModels.first;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Watch the StateNotifierProvider for state changes (loading, data, error).
     final state = ref.watch(stockDetailProvider(widget.symbol));
+    
+    // --- ADD THIS ROBUSTNESS CHECK ---
+    // Get the currently available models for this specific symbol.
+    final availableModels = ref.read(stockDetailProvider(widget.symbol).notifier).availableModels;
+    // If the currently selected model is NOT in the new list, reset to the first one.
+    if (!availableModels.contains(_selectedModel)) {
+      _selectedModel = availableModels.first;
+    }
+    // --- END OF CHECK ---
 
-    return Scaffold(
+return Scaffold(
       appBar: AppBar(
         title: Text(widget.symbol.toUpperCase()),
       ),
-      body: state.when(
-        // When data is successfully loaded, build the UI.
-        data: (stockDetailState) => Column(
+      // Use a switch statement on the state for clarity
+      body: switch (state) {
+        // When data is available, show the dropdown and chart
+        AsyncData(:final value) => Column(
           children: [
-            // --- Dropdown Menu for Model Selection ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: DropdownButtonFormField<String>(
@@ -45,9 +50,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                   labelText: 'Select Prediction Model',
                   border: OutlineInputBorder(),
                 ),
-                // Build the dropdown items from the notifier's list of models.
-                items: ref.read(stockDetailProvider(widget.symbol).notifier)
-                    .availableModels
+                items: availableModels
                     .map((model) => DropdownMenuItem(
                           value: model,
                           child: Text(model.replaceAll('_', ' ').toUpperCase()),
@@ -55,37 +58,31 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                     .toList(),
                 onChanged: (String? newModel) {
                   if (newModel != null) {
-                    // Update the local state to show the new selection.
-                    setState(() {
-                      _selectedModel = newModel;
-                    });
-                    // Call the notifier to generate a new forecast with the selected model.
+                    setState(() { _selectedModel = newModel; });
                     ref.read(stockDetailProvider(widget.symbol).notifier)
                         .generateForecast(newModel);
                   }
                 },
               ),
             ),
-            // Use an Expanded widget to make the chart fill the remaining screen space.
             Expanded(
               child: StockChart(
-                data: stockDetailState.historicalData,
-                // Pass the forecast data (which can be null) to the chart widget.
-                forecastData: stockDetailState.forecast,
+                data: value.historicalData,
+                forecastData: value.forecast,
               ),
             ),
           ],
         ),
-        // Show a loading indicator while data is being fetched.
-        loading: () => const Center(child: CircularProgressIndicator()),
-        // Show an error message if something goes wrong.
-        error: (err, stack) => Center(
+        // When an error occurs, display it clearly
+        AsyncError(:final error) => Center(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text('Error: $err'),
+            child: Text('Failed to load data:\n$error', textAlign: TextAlign.center),
           ),
         ),
-      ),
+        // By default (which is the loading state), show the progress indicator
+        _ => const Center(child: CircularProgressIndicator()),
+      },
     );
   }
 }
