@@ -1,78 +1,121 @@
-import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:auravest/src/domain/entities/stock_data_point.dart';
+import 'package:auravest/src/domain/entities/stock_forecast.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+// --- 1. Import your new Dart model file ---
+import 'linear_regression_model.dart';
 
 class PredictionService {
+  // For TFLite models
   final Map<String, Interpreter> _interpreters = {};
-
-  // --- 1. Add your MEAN and SCALE constants here ---
-  static const _mean = [1680.771, 1697.5345, 1663.7554, 1682.4292, 7054084.3226];
-  static const _scale = [181.9071, 183.6897, 179.9181, 181.4488, 3095167.0655];
   
+  // --- 2. Create an instance of your Dart model ---
+  final _linearRegressionModel = LinearRegressionModel();
+
+  // Stats for your TFLite models (e.g., Random Forest for TCS)
+  // TODO: Replace with the actual MEAN and SCALE values for your TCS Random Forest model.
+  static const _tcsRfMean = [3459.7615, 3488.3833, 3429.0234, 3460.9052, 2688315.8508];
+  static const _tcsRfScale = [416.7372, 422.4238, 409.08, 416.0, 1.0];
+
+  // This will load only the models that need TFLite.
   Future<void> loadModels(List<String> modelNames) async {
     try {
       for (var name in modelNames) {
-        _interpreters[name] = await Interpreter.fromAsset('$name.tflite');
+        if (name == 'linear_regression') continue;
+        
+        if (!_interpreters.containsKey(name)) {
+          _interpreters[name] = await Interpreter.fromAsset('$name.tflite');
+        }
       }
-      print('All models loaded successfully.');
+      print('TFLite models loaded successfully.');
     } catch (e) {
-      print('Failed to load models: $e');
+      print('Failed to load TFLite models: $e');
     }
   }
 
-  // --- 2. The getPrediction method is now completely replaced ---
   Future<List<double>> getPrediction(
       String modelName, List<StockDataPoint> historicalData) async {
-    final interpreter = _interpreters[modelName];
 
-    if (interpreter == null) {
-      throw Exception('Model $modelName is not loaded.');
+    if (historicalData.isEmpty) {
+      throw Exception("Cannot predict with no historical data.");
     }
+    final lastDataPoint = historicalData.last;
+
+    // --- 3. The Core Logic Change ---
+    if (modelName == 'linear_regression') {
+      // If the selected model is Linear Regression, use the Dart function.
+      print("Predicting with Dart Linear Regression model...");
+
+      // Prepare the input features from the last available day of data.
+      final features = [
+        lastDataPoint.open,
+        lastDataPoint.high,
+        lastDataPoint.low,
+        lastDataPoint.close,
+        lastDataPoint.volume,
+      ];
+
+      // Get the single predicted value from your formula.
+      final prediction = _linearRegressionModel.score(features);
+
+      // Create a 5-day forecast based on this single prediction.
+      // We'll add a tiny upward trend for visualization.
+      return List.generate(5, (i) => prediction * (1 + (i * 0.001)));
+
+    } else {
+      // For any other model (like Random Forest), use the TFLite logic.
+      print("Predicting with TFLite model: $modelName...");
+      
+      // The rest of this logic is for your TFLite models
+      // TODO: Make sure you have a tcs_rf_model.tflite in your assets for this to work.
+      await loadModels([modelName]);
+      final interpreter = _interpreters[modelName];
+      if (interpreter == null) throw Exception('$modelName TFLite model is not loaded.');
+
+      // Preprocessing, Inference, and Postprocessing for TFLite...
+      // This is a placeholder and should be adapted for your actual RF model.
+      final closeMean = _tcsRfMean[3];
+      final closeScale = _tcsRfScale[3];
+      return List.generate(5, (i) => (lastDataPoint.close * 1.01) - (i * 5.0))
+            .map((val) => (val * closeScale) + closeMean).toList();
+    }
+  }
+  Future<List<StockForecast>> getBacktestedPredictions(
+      String modelName, List<StockDataPoint> historicalData) async {
     
-    // Define the lookback window (how many previous days the model needs).
-    // This MUST match what the model was trained with. We'll assume 10 for this example.
-    const int lookbackWindow = 10;
+    // We will generate a prediction for every day in the historical data.
+    final List<StockForecast> backtestPredictions = [];
 
-    if (historicalData.length < lookbackWindow) {
-      throw Exception('Not enough historical data to make a prediction.');
-    }
+    if (modelName == 'linear_regression') {
+      print("Generating backtest for Dart Linear Regression model...");
 
-    // --- 3. Preprocessing: Normalize the input data ---
-    // Get the last `lookbackWindow` data points.
-    final recentData = historicalData.sublist(historicalData.length - lookbackWindow);
+      // Loop through each historical data point to make a prediction for the NEXT day.
+      for (int i = 0; i < historicalData.length - 1; i++) {
+        final currentDay = historicalData[i];
+        final nextDay = historicalData[i + 1];
 
-    // Create the input tensor with the correct shape [1, lookbackWindow, 5 features].
-    final input = List.generate(1, (_) => 
-      List.generate(lookbackWindow, (i) {
-        final point = recentData[i];
-        return [
-          (point.open - _mean[0]) / _scale[0],
-          (point.high - _mean[1]) / _scale[1],
-          (point.low - _mean[2]) / _scale[2],
-          (point.close - _mean[3]) / _scale[3],
-          (point.volume - _mean[4]) / _scale[4],
+        // Prepare the features from the current day.
+        final features = [
+          currentDay.open,
+          currentDay.high,
+          currentDay.low,
+          currentDay.close,
+          currentDay.volume,
         ];
-      })
-    );
-    
-    // Prepare the output tensor. Let's assume the model predicts the next 5 days.
-    // The shape should be [1, 5] for 5 predicted values.
-    var output = List.filled(1 * 5, 0.0).reshape([1, 5]);
 
-    // Run inference.
-    interpreter.run(input, output);
-    
-    // --- 4. Postprocessing: Denormalize the output data ---
-    // We assume the model predicts the 'close' price.
-    // So, we use the mean and scale for the 'close' feature (index 3).
-    final double closeMean = _mean[3];
-    final double closeScale = _scale[3];
+        // Use the model to predict the next day's price.
+        final predictedValue = _linearRegressionModel.score(features);
 
-    final List<double> forecast = [];
-    for (var normalizedValue in output[0]) {
-      final denormalizedValue = (normalizedValue * closeScale) + closeMean;
-      forecast.add(denormalizedValue);
+        // Add the result to our list, using the ACTUAL date of the next day.
+        backtestPredictions.add(
+          StockForecast(date: nextDay.date, value: predictedValue),
+        );
+      }
+    } else {
+      // TODO: You would implement similar looping logic for your TFLite models here.
+      // For now, we will return an empty list for other models.
+      print("Backtesting for $modelName is not yet implemented.");
     }
-    
-    return forecast;
+
+    return backtestPredictions;
   }
 }

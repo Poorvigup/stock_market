@@ -10,8 +10,9 @@ const Color _tooltipBackgroundColor = Color.fromARGB(204, 96, 125, 139);
 class StockChart extends StatelessWidget {
   final List<StockDataPoint> data;
   final List<StockForecast>? forecastData;
+  final List<StockForecast>? backtestData;
 
-  const StockChart({Key? key, required this.data, this.forecastData}) : super(key: key);
+  const StockChart({Key? key, required this.data, this.forecastData, this.backtestData,}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +35,22 @@ class StockChart extends StatelessWidget {
           (historicalSpots.length - 1) + (i + 1).toDouble(),
           forecastData![i].value,
         ));
+      }
+    }
+
+    final List<FlSpot> backtestSpots = [];
+    if (backtestData != null) {
+      // Create a map for quick date-to-index lookup.
+      final dateToIndexMap = {
+        for (var i = 0; i < reversedData.length; i++) reversedData[i].date: i
+      };
+
+      for (final prediction in backtestData!) {
+        // Find the correct x-axis index for this prediction's date.
+        if (dateToIndexMap.containsKey(prediction.date)) {
+          final index = dateToIndexMap[prediction.date]!;
+          backtestSpots.add(FlSpot(index.toDouble(), prediction.value));
+        }
       }
     }
 
@@ -111,38 +128,38 @@ class StockChart extends StatelessWidget {
             border: Border.all(color: const Color(0xff37434d), width: 1),
           ),
           lineBarsData: [
-            // The historical data line
+            // 1. The historical data line (Solid Blue)
             LineChartBarData(
               spots: historicalSpots,
               isCurved: true,
               color: Colors.cyan,
               barWidth: 3,
-              isStrokeCapRound: true,
               dotData: FlDotData(show: false),
-              belowBarData: BarAreaData(
-                show: true,
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.cyan.withOpacity(0.3),
-                    Colors.cyan.withOpacity(0.0),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-              ),
+              belowBarData: BarAreaData( /* ... */ ),
             ),
-            // The forecast line (only rendered if forecastSpots is not empty)
+            
+            // 2. The forecast line (Dashed Orange)
             if (forecastSpots.isNotEmpty)
               LineChartBarData(
                 spots: forecastSpots,
                 isCurved: true,
                 color: Colors.orangeAccent,
                 barWidth: 3,
-                isStrokeCapRound: true,
                 dotData: FlDotData(show: false),
-                dashArray: [5, 5], // Dashed line style
+                dashArray: [5, 5],
               ),
-          ],
+              
+            // --- 3. The new backtest line (Dotted Purple) ---
+            if (backtestSpots.isNotEmpty)
+              LineChartBarData(
+                spots: backtestSpots,
+                isCurved: true,
+                color: Colors.purpleAccent, // A different color
+                barWidth: 2, // Make it a bit thinner
+                dotData: FlDotData(show: false),
+                dashArray: [2, 4], // A different dash style (more like dots)
+              ),
+         ],
         ),
       ),
     );

@@ -1,3 +1,4 @@
+import 'package:auravest/src/data/datasources/linear_regression_model.dart';
 import 'package:auravest/src/data/datasources/stock_api_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,8 +52,9 @@ final stockDetailProvider = StateNotifierProvider.autoDispose
 class StockDetailState {
   final List<StockDataPoint> historicalData;
   final List<StockForecast>? forecast;
+  final List<StockForecast>? backtest;
 
-  StockDetailState({required this.historicalData, this.forecast});
+  StockDetailState({required this.historicalData, this.forecast, this.backtest});
 }
 
 // The StateNotifier that contains all the business logic for the detail screen.
@@ -64,6 +66,33 @@ class StockDetailNotifier
 
   // This final field is now correctly initialized in the constructor.
   final List<String> availableModels;
+  void _updateStateWithForecast(List<double> forecastValues) async {
+    if (_historicalData.isEmpty) return;
+    
+    // --- GENERATE BACKTEST DATA ---
+    // Use the reversed historical data for the backtest function.
+    final historicalDataForModel = _historicalData.reversed.toList();
+    final backtestData = await _predictionService.getBacktestedPredictions(
+        availableModels.first, // Or the currently selected model
+        historicalDataForModel
+    );
+    // --- END OF GENERATION ---
+
+    DateTime lastDate = _historicalData.first.date;
+    final forecastPoints = forecastValues.asMap().entries.map((entry) {
+      return StockForecast(
+        date: lastDate.add(Duration(days: entry.key + 1)),
+        value: entry.value,
+      );
+    }).toList();
+
+    // 3. Include the backtest data when updating the state.
+    state = AsyncValue.data(StockDetailState(
+      historicalData: _historicalData,
+      forecast: forecastPoints,
+      backtest: backtestData, // <-- PASS THE NEW DATA
+    ));
+  }
 
   // The constructor with the corrected initializer list syntax.
   StockDetailNotifier({
@@ -82,12 +111,19 @@ class StockDetailNotifier
   
   // Static helper function to keep the constructor clean.
   static List<String> _getModelsForSymbol(String symbol) {
-    if (symbol.toUpperCase() == 'INFY.NS') {
-      // If it's Infosys, offer both models.
-      return const ['linear_regression', 'random_forest'];
+    if (symbol.toUpperCase() == 'TCS.NS' || symbol.toUpperCase() == 'TCS.BO') {
+      // For TCS, offer both the Dart model and the future TFLite models.
+      return const [
+        'linear_regression',
+        'random_forest',
+        // 'svr',
+        // 'xg_boost'
+      ];
     } else {
-      // For any other stock, ONLY offer the generic Linear Regression model.
-      return const ['linear_regression'];
+      // For any other stock, we can offer the Dart Linear Regression as a generic model.
+      return const [
+        'linear_regression'
+      ];
     }
   }
 
@@ -113,38 +149,44 @@ class StockDetailNotifier
     try {
       if (_historicalData.isEmpty) return;
 
-      if (modelName == 'random_forest' && _symbol.toUpperCase() == 'INFY.NS') {
-        final historicalDataForModel = _historicalData.reversed.toList();
-        final forecastValues = await _predictionService.getPrediction(
-            modelName, historicalDataForModel);
-        _updateStateWithForecast(forecastValues);
-      } else {
-        // Fallback for our simulated Linear Regression model for any stock.
-        final historicalClosePrices = _historicalData.map((d) => d.close).toList().reversed.toList();
-        final lastValue = historicalClosePrices.last;
-        final forecastValues = List.generate(5, (i) => lastValue * (1 + (i+1) * 0.002));
-        _updateStateWithForecast(forecastValues);
-      }
+      // 1. Get the data ready for the models.
+      final historicalDataForModel = _historicalData.reversed.toList();
+      
+      // 2. Generate the FUTURE forecast (for the orange line).
+      // We will simulate this for now to match the Linear Regression Dart model.
+      final lastDataPoint = historicalDataForModel.last;
+      final features = [
+        lastDataPoint.open,
+        lastDataPoint.high,
+        lastDataPoint.low,
+        lastDataPoint.close,
+        lastDataPoint.volume
+      ];
+      final singlePrediction = LinearRegressionModel().score(features);
+      final forecastValues = List.generate(5, (i) => singlePrediction * (1 + (i * 0.001)));
+
+      // 3. Generate the BACKTEST predictions (for the purple line).
+      final backtestData = await _predictionService.getBacktestedPredictions(
+          modelName, historicalDataForModel);
+      
+      // 4. Prepare the forecast points for the chart.
+      DateTime lastDate = _historicalData.first.date;
+      final forecastPoints = forecastValues.asMap().entries.map((entry) {
+        return StockForecast(
+          date: lastDate.add(Duration(days: entry.key + 1)),
+          value: entry.value,
+        );
+      }).toList();
+
+      // 5. Update the state ONCE with ALL the data ready.
+      state = AsyncValue.data(StockDetailState(
+        historicalData: _historicalData,
+        forecast: forecastPoints,
+        backtest: backtestData, // The backtest data is now included correctly.
+      ));
+
     } catch (e, stack) {
       state = AsyncValue.error(e, stack);
     }
-  }
-
-  // Helper method to update the state with a new forecast.
-  void _updateStateWithForecast(List<double> forecastValues) {
-    if (_historicalData.isEmpty) return;
-    
-    DateTime lastDate = _historicalData.first.date;
-    final forecastPoints = forecastValues.asMap().entries.map((entry) {
-      return StockForecast(
-        date: lastDate.add(Duration(days: entry.key + 1)),
-        value: entry.value,
-      );
-    }).toList();
-
-    state = AsyncValue.data(StockDetailState(
-      historicalData: _historicalData,
-      forecast: forecastPoints,
-    ));
   }
 }
