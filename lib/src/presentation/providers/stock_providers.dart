@@ -116,7 +116,7 @@ class StockDetailNotifier
       return const [
         'linear_regression',
         'random_forest',
-        // 'svr',
+        'svr',
         // 'xg_boost'
       ];
     } else {
@@ -135,7 +135,6 @@ class StockDetailNotifier
     state = const AsyncValue.loading();
     try {
       // Load all possible models so they are ready if needed.
-      await _predictionService.loadModels(['linear_regression', 'random_forest']);
       _historicalData = await _stockRepository.getStockData(_symbol);
       // Generate the initial forecast with the first model in our dynamic list.
       await generateForecast(availableModels.first);

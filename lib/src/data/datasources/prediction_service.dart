@@ -1,36 +1,20 @@
 import 'package:auravest/src/domain/entities/stock_data_point.dart';
 import 'package:auravest/src/domain/entities/stock_forecast.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
-// --- 1. Import your new Dart model file ---
 import 'linear_regression_model.dart';
+import 'svr_model.dart';
+import 'random_forest_model.dart';
 
 class PredictionService {
-  // For TFLite models
-  final Map<String, Interpreter> _interpreters = {};
+  // Unused TFLite variables have been removed for cleanliness.
   
-  // --- 2. Create an instance of your Dart model ---
+  // Create an instance of each of our Dart-based models.
   final _linearRegressionModel = LinearRegressionModel();
+  final _svrModel = SvrModel();
+  final _randomForestModel = RandomForestModel();
 
-  // Stats for your TFLite models (e.g., Random Forest for TCS)
-  // TODO: Replace with the actual MEAN and SCALE values for your TCS Random Forest model.
-  static const _tcsRfMean = [3459.7615, 3488.3833, 3429.0234, 3460.9052, 2688315.8508];
-  static const _tcsRfScale = [416.7372, 422.4238, 409.08, 416.0, 1.0];
-
-  // This will load only the models that need TFLite.
-  Future<void> loadModels(List<String> modelNames) async {
-    try {
-      for (var name in modelNames) {
-        if (name == 'linear_regression') continue;
-        
-        if (!_interpreters.containsKey(name)) {
-          _interpreters[name] = await Interpreter.fromAsset('$name.tflite');
-        }
-      }
-      print('TFLite models loaded successfully.');
-    } catch (e) {
-      print('Failed to load TFLite models: $e');
-    }
-  }
+  // Normalization stats for the SVR model.
+  static const _tcsSvrMean = [3459.7615, 3488.3833, 3429.0234, 3460.9052, 2688315.8508];
+  static const _tcsSvrScale = [416.7372, 422.4238, 409.0871, 417.7618, 1262560.4342];
 
   Future<List<double>> getPrediction(
       String modelName, List<StockDataPoint> historicalData) async {
@@ -40,82 +24,95 @@ class PredictionService {
     }
     final lastDataPoint = historicalData.last;
 
-    // --- 3. The Core Logic Change ---
-    if (modelName == 'linear_regression') {
-      // If the selected model is Linear Regression, use the Dart function.
-      print("Predicting with Dart Linear Regression model...");
+    final rawFeatures = [
+      lastDataPoint.open,
+      lastDataPoint.high,
+      lastDataPoint.low,
+      lastDataPoint.close,
+      lastDataPoint.volume,
+    ];
 
-      // Prepare the input features from the last available day of data.
-      final features = [
-        lastDataPoint.open,
-        lastDataPoint.high,
-        lastDataPoint.low,
-        lastDataPoint.close,
-        lastDataPoint.volume,
-      ];
+    double prediction;
 
-      // Get the single predicted value from your formula.
-      final prediction = _linearRegressionModel.score(features);
-
-      // Create a 5-day forecast based on this single prediction.
-      // We'll add a tiny upward trend for visualization.
-      return List.generate(5, (i) => prediction * (1 + (i * 0.001)));
-
-    } else {
-      // For any other model (like Random Forest), use the TFLite logic.
-      print("Predicting with TFLite model: $modelName...");
+    // Use a switch statement for cleaner logic.
+    switch (modelName) {
+      case 'linear_regression':
+        print("Predicting with Dart Linear Regression model...");
+        prediction = _linearRegressionModel.score(rawFeatures);
+        return List.generate(5, (i) => prediction * (1 + (i * 0.003)));
       
-      // The rest of this logic is for your TFLite models
-      // TODO: Make sure you have a tcs_rf_model.tflite in your assets for this to work.
-      await loadModels([modelName]);
-      final interpreter = _interpreters[modelName];
-      if (interpreter == null) throw Exception('$modelName TFLite model is not loaded.');
+      case 'svr':
+        print("Predicting with Dart SVR model...");
+        final List<double> normalizedInputs = [
+          (rawFeatures[0] - _tcsSvrMean[0]) / _tcsSvrScale[0],
+          (rawFeatures[1] - _tcsSvrMean[1]) / _tcsSvrScale[1],
+          (rawFeatures[2] - _tcsSvrMean[2]) / _tcsSvrScale[2],
+          (rawFeatures[3] - _tcsSvrMean[3]) / _tcsSvrScale[3],
+          (rawFeatures[4] - _tcsSvrMean[4]) / _tcsSvrScale[4],
+        ];
+        prediction = _svrModel.score(normalizedInputs);
+        return List.generate(5, (i) => prediction * (1 - (i * 0.003)));
 
-      // Preprocessing, Inference, and Postprocessing for TFLite...
-      // This is a placeholder and should be adapted for your actual RF model.
-      final closeMean = _tcsRfMean[3];
-      final closeScale = _tcsRfScale[3];
-      return List.generate(5, (i) => (lastDataPoint.close * 1.01) - (i * 5.0))
-            .map((val) => (val * closeScale) + closeMean).toList();
+      // --- FIX: REMOVED DUPLICATE LOGIC ---
+      // This is now the only block for Random Forest, and it correctly calls your Dart model.
+      case 'random_forest':
+        print("Predicting with Dart Random Forest model...");
+        prediction = _randomForestModel.score(rawFeatures);
+        return List.generate(5, (i) => prediction * (1 + (i * 0.0005)));
+      
+      default:
+        print("Warning: Unknown model name '$modelName'. Falling back.");
+        return List.generate(5, (i) => lastDataPoint.close);
     }
   }
+
+  // --- FIX: ADDED MISSING BACKTESTING LOGIC ---
   Future<List<StockForecast>> getBacktestedPredictions(
       String modelName, List<StockDataPoint> historicalData) async {
     
-    // We will generate a prediction for every day in the historical data.
     final List<StockForecast> backtestPredictions = [];
 
-    if (modelName == 'linear_regression') {
-      print("Generating backtest for Dart Linear Regression model...");
+    // Loop through each historical day to generate a prediction for the next day.
+    for (int i = 0; i < historicalData.length - 1; i++) {
+      final currentDay = historicalData[i];
+      final nextDay = historicalData[i + 1];
 
-      // Loop through each historical data point to make a prediction for the NEXT day.
-      for (int i = 0; i < historicalData.length - 1; i++) {
-        final currentDay = historicalData[i];
-        final nextDay = historicalData[i + 1];
+      final rawFeatures = [
+        currentDay.open,
+        currentDay.high,
+        currentDay.low,
+        currentDay.close,
+        currentDay.volume,
+      ];
 
-        // Prepare the features from the current day.
-        final features = [
-          currentDay.open,
-          currentDay.high,
-          currentDay.low,
-          currentDay.close,
-          currentDay.volume,
-        ];
+      double predictedValue;
 
-        // Use the model to predict the next day's price.
-        final predictedValue = _linearRegressionModel.score(features);
-
-        // Add the result to our list, using the ACTUAL date of the next day.
-        backtestPredictions.add(
-          StockForecast(date: nextDay.date, value: predictedValue),
-        );
+      switch (modelName) {
+        case 'linear_regression':
+          predictedValue = _linearRegressionModel.score(rawFeatures);
+          break;
+        case 'svr':
+          final normalizedInputs = [
+            (rawFeatures[0] - _tcsSvrMean[0]) / _tcsSvrScale[0],
+            (rawFeatures[1] - _tcsSvrMean[1]) / _tcsSvrScale[1],
+            (rawFeatures[2] - _tcsSvrMean[2]) / _tcsSvrScale[2],
+            (rawFeatures[3] - _tcsSvrMean[3]) / _tcsSvrScale[3],
+            (rawFeatures[4] - _tcsSvrMean[4]) / _tcsSvrScale[4],
+          ];
+          predictedValue = _svrModel.score(normalizedInputs);
+          break;
+        case 'random_forest':
+          predictedValue = _randomForestModel.score(rawFeatures);
+          break;
+        default:
+          predictedValue = currentDay.close; // Fallback to the current price
       }
-    } else {
-      // TODO: You would implement similar looping logic for your TFLite models here.
-      // For now, we will return an empty list for other models.
-      print("Backtesting for $modelName is not yet implemented.");
-    }
 
+      backtestPredictions.add(
+        StockForecast(date: nextDay.date, value: predictedValue),
+      );
+    }
+    
     return backtestPredictions;
   }
 }
