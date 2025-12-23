@@ -6,9 +6,6 @@ import 'random_forest_model.dart';
 import 'xg_boost_model.dart';
 
 class PredictionService {
-  // Unused TFLite variables have been removed for cleanliness.
-
-  // Create an instance of each of our Dart-based models.
   final _linearRegressionModel = LinearRegressionModel();
   final _svrModel = SvrModel();
   final _randomForestModel = RandomForestModel();
@@ -47,7 +44,6 @@ class PredictionService {
 
     double prediction;
 
-    // Use a switch statement for cleaner logic.
     switch (modelName) {
       case 'linear_regression':
         print("Predicting with Dart Linear Regression model...");
@@ -65,19 +61,15 @@ class PredictionService {
         ];
         prediction = _svrModel.score(normalizedInputs);
         return List.generate(5, (i) => prediction * (1 - (i * 0.003)));
-      // --- FIX: REMOVED DUPLICATE LOGIC ---
-      // This is now the only block for Random Forest, and it correctly calls your Dart model.
       case 'random_forest':
         print("Predicting with Dart Random Forest model...");
         prediction = _randomForestModel.score(rawFeatures);
         return List.generate(5, (i) => prediction * (1 + (i * 0.0005)));
 
       case 'xg_boost':
-        // --- THIS IS THE CRITICAL FIX ---
         // 1. Get the raw output from the model (which is the predicted *change*).
         final rawXgBoostOutput = _xgBoostModel.score(rawFeatures);
 
-        // --- DEBUGGING: Let's see what the model is actually outputting ---
         print("--- XGBoost Debug ---");
         print("Last Close Price: ${lastDataPoint.close}");
         print("Raw XGBoost Output (the change): $rawXgBoostOutput");
@@ -94,7 +86,6 @@ class PredictionService {
     }
   }
 
-  // --- FIX: ADDED MISSING BACKTESTING LOGIC ---
   Future<List<StockForecast>> getBacktestedPredictions(
       String modelName, List<StockDataPoint> historicalData) async {
     final List<StockForecast> backtestPredictions = [];
