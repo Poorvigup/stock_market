@@ -1,3 +1,4 @@
+import 'package:auravest/src/core/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:auravest/src/presentation/screens/stock_detail_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -26,16 +27,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   // --- Step 3: Define the list of popular companies ---
   final List<Company> _popularCompanies = const [
-    // US Companies
-    Company(name: 'Apple', symbol: 'AAPL', countryCode: 'US'),
-    Company(name: 'Google', symbol: 'GOOGL', countryCode: 'US'),
-    Company(name: 'Microsoft', symbol: 'MSFT', countryCode: 'US'),
-    Company(name: 'Tesla', symbol: 'TSLA', countryCode: 'US'),
-    // Indian Companies
-    Company(name: 'Reliance Industries', symbol: 'RELIANCE.NS', countryCode: 'IN'),
-    Company(name: 'Infosys', symbol: 'INFY.NS', countryCode: 'IN'),
     Company(name: 'Tata Consultancy', symbol: 'TCS.BO', countryCode: 'IN'),
-    Company(name: 'HDFC Bank', symbol: 'HDFCBANK.BO', countryCode: 'IN'),
   ];
 
   // State variable to hold the selected company
@@ -87,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AuraVest'),
+        title: const Text('Predicto'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -129,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(
               controller: _symbolController,
               decoration: const InputDecoration(
-                labelText: 'Enter Custom Stock Symbol (e.g., INFY.NS)',
+                labelText: 'Enter Custom Stock Symbol',
                 border: OutlineInputBorder(),
               ),
               onChanged: (value) {
@@ -152,6 +144,14 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () =>
                   _navigateToDetailScreen(_symbolController.text.trim()),
               child: const Text('Search'),
+            ),
+            const SizedBox(height: 40), // Add some space above the image
+            
+            Image.asset(
+              'assets/images/analysis_icon.png',
+              height: 500, // Give the image a fixed height
+              // Optional: Add a color to make it match your theme
+              color: AppColors.primaryDark.withOpacity(0.8),
             ),
           ],
         ),

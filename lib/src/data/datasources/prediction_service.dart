@@ -3,22 +3,35 @@ import 'package:auravest/src/domain/entities/stock_forecast.dart';
 import 'linear_regression_model.dart';
 import 'svr_model.dart';
 import 'random_forest_model.dart';
+import 'xg_boost_model.dart';
 
 class PredictionService {
   // Unused TFLite variables have been removed for cleanliness.
-  
+
   // Create an instance of each of our Dart-based models.
   final _linearRegressionModel = LinearRegressionModel();
   final _svrModel = SvrModel();
   final _randomForestModel = RandomForestModel();
+  final _xgBoostModel = XgBoostModel();
 
   // Normalization stats for the SVR model.
-  static const _tcsSvrMean = [3459.7615, 3488.3833, 3429.0234, 3460.9052, 2688315.8508];
-  static const _tcsSvrScale = [416.7372, 422.4238, 409.0871, 417.7618, 1262560.4342];
+  static const _tcsSvrMean = [
+    3459.7615,
+    3488.3833,
+    3429.0234,
+    3460.9052,
+    2688315.8508
+  ];
+  static const _tcsSvrScale = [
+    416.7372,
+    422.4238,
+    409.0871,
+    417.7618,
+    1262560.4342
+  ];
 
   Future<List<double>> getPrediction(
       String modelName, List<StockDataPoint> historicalData) async {
-
     if (historicalData.isEmpty) {
       throw Exception("Cannot predict with no historical data.");
     }
@@ -40,7 +53,7 @@ class PredictionService {
         print("Predicting with Dart Linear Regression model...");
         prediction = _linearRegressionModel.score(rawFeatures);
         return List.generate(5, (i) => prediction * (1 + (i * 0.003)));
-      
+
       case 'svr':
         print("Predicting with Dart SVR model...");
         final List<double> normalizedInputs = [
@@ -52,24 +65,38 @@ class PredictionService {
         ];
         prediction = _svrModel.score(normalizedInputs);
         return List.generate(5, (i) => prediction * (1 - (i * 0.003)));
-
       // --- FIX: REMOVED DUPLICATE LOGIC ---
       // This is now the only block for Random Forest, and it correctly calls your Dart model.
       case 'random_forest':
         print("Predicting with Dart Random Forest model...");
         prediction = _randomForestModel.score(rawFeatures);
         return List.generate(5, (i) => prediction * (1 + (i * 0.0005)));
-      
+
+      case 'xg_boost':
+        // --- THIS IS THE CRITICAL FIX ---
+        // 1. Get the raw output from the model (which is the predicted *change*).
+        final rawXgBoostOutput = _xgBoostModel.score(rawFeatures);
+
+        // --- DEBUGGING: Let's see what the model is actually outputting ---
+        print("--- XGBoost Debug ---");
+        print("Last Close Price: ${lastDataPoint.close}");
+        print("Raw XGBoost Output (the change): $rawXgBoostOutput");
+
+        // 2. Calculate the final prediction by adding the change to the last closing price.
+        prediction = lastDataPoint.close + rawXgBoostOutput;
+        print("Final XGBoost Prediction: $prediction");
+        print("---------------------");
+        return List.generate(5, (i) => prediction);
+
       default:
-        print("Warning: Unknown model name '$modelName'. Falling back.");
-        return List.generate(5, (i) => lastDataPoint.close);
+        prediction = lastDataPoint.close;
+        return List.generate(5, (i) => prediction);
     }
   }
 
   // --- FIX: ADDED MISSING BACKTESTING LOGIC ---
   Future<List<StockForecast>> getBacktestedPredictions(
       String modelName, List<StockDataPoint> historicalData) async {
-    
     final List<StockForecast> backtestPredictions = [];
 
     // Loop through each historical day to generate a prediction for the next day.
@@ -104,15 +131,23 @@ class PredictionService {
         case 'random_forest':
           predictedValue = _randomForestModel.score(rawFeatures);
           break;
+        case 'xg_boost':
+          final rawXgBoostOutput = _xgBoostModel.score(rawFeatures);
+          predictedValue = currentDay.close + rawXgBoostOutput;
+          break;
         default:
           predictedValue = currentDay.close; // Fallback to the current price
+      }
+
+      if (predictedValue.isNaN || predictedValue.isInfinite) {
+        predictedValue = currentDay.close;
       }
 
       backtestPredictions.add(
         StockForecast(date: nextDay.date, value: predictedValue),
       );
     }
-    
+
     return backtestPredictions;
   }
 }

@@ -14,7 +14,7 @@ class AuraVestApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AuraVest',
+      title: 'Predicto',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
       home: HomeScreen(), // HomeScreen does not need to be const here
